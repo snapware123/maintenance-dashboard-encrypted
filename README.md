@@ -1,0 +1,1 @@
+# Encrypted Maintenance Dashboard\n\nPublic static shell with encrypted dashboard snapshot.\n
