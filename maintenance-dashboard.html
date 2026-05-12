@@ -6121,6 +6121,7 @@ document.querySelectorAll('.section-header .section-tools').forEach(el => {
   const input = document.getElementById('secure-password');
   const error = document.getElementById('secure-error');
   const shell = document.getElementById('secure-lock');
+  const passwordSessionKey = 'maintenance_dashboard_tab_password_v1';
   const cacheKeys = [
     'prop_hospitable_reservations_v1',
     'prop_hospitable_calendar_v1',
@@ -6165,28 +6166,59 @@ document.querySelectorAll('.section-header .section-tools').forEach(el => {
     try { cacheKeys.forEach(key => localStorage.removeItem(key)); } catch {}
   }
 
+  function cacheTabPassword(password) {
+    try { sessionStorage.setItem(passwordSessionKey, password); } catch {}
+  }
+
+  function clearTabPassword() {
+    try { sessionStorage.removeItem(passwordSessionKey); } catch {}
+  }
+
+  function cachedTabPassword() {
+    try { return sessionStorage.getItem(passwordSessionKey) || ''; } catch { return ''; }
+  }
+
+  async function unlockDashboard(password, { remember = true } = {}) {
+    const snapshot = await decryptSnapshot(password);
+    if (typeof setManagedProperties === 'function') {
+      setManagedProperties(snapshot.managedProperties || []);
+    }
+    window.__MAINTENANCE_DASHBOARD_SNAPSHOT__ = snapshot;
+    if (typeof applySnapshotToDashboard !== 'function' || !applySnapshotToDashboard(snapshot, {
+      kind: 'encrypted-online',
+      label: 'Encrypted online snapshot',
+      detail: 'Unlocked in this browser with the team password',
+    })) {
+      throw new Error('Dashboard rejected the decrypted snapshot');
+    }
+    clearPersistedSnapshot();
+    if (remember) cacheTabPassword(password);
+    document.documentElement.classList.remove('secure-locked');
+    shell.remove();
+    if (typeof showToast === 'function') showToast('Dashboard unlocked');
+  }
+
+  async function unlockFromTabSession() {
+    const password = cachedTabPassword();
+    if (!password) return;
+    shell.classList.add('is-busy');
+    try {
+      await unlockDashboard(password, { remember: false });
+    } catch (err) {
+      clearTabPassword();
+      shell.classList.remove('is-busy');
+      console.warn('Cached dashboard unlock expired:', err);
+    }
+  }
+
   form.addEventListener('submit', async event => {
     event.preventDefault();
     error.style.display = 'none';
     shell.classList.add('is-busy');
     try {
-      const snapshot = await decryptSnapshot(input.value);
-      if (typeof setManagedProperties === 'function') {
-        setManagedProperties(snapshot.managedProperties || []);
-      }
-      window.__MAINTENANCE_DASHBOARD_SNAPSHOT__ = snapshot;
-      if (typeof applySnapshotToDashboard !== 'function' || !applySnapshotToDashboard(snapshot, {
-        kind: 'encrypted-online',
-        label: 'Encrypted online snapshot',
-        detail: 'Unlocked in this browser with the team password',
-      })) {
-        throw new Error('Dashboard rejected the decrypted snapshot');
-      }
-      clearPersistedSnapshot();
-      document.documentElement.classList.remove('secure-locked');
-      shell.remove();
-      if (typeof showToast === 'function') showToast('Dashboard unlocked');
+      await unlockDashboard(input.value);
     } catch (err) {
+      clearTabPassword();
       console.warn('Dashboard unlock failed:', err);
       error.style.display = 'block';
       input.select();
@@ -6194,6 +6226,8 @@ document.querySelectorAll('.section-header .section-tools').forEach(el => {
       shell.classList.remove('is-busy');
     }
   });
+
+  unlockFromTabSession();
 })();
 </script>
 </body>
