@@ -1858,7 +1858,7 @@
     <div id="last-updated"></div>
     <div id="sync-status"></div>
     <div class="hdr-actions">
-      <button class="hdr-btn primary" id="sync-btn" disabled>Encrypted online snapshot</button>
+      <button class="hdr-btn primary" id="sync-btn" data-static-sync="encrypted-online" disabled>Encrypted online snapshot</button>
       <button class="theme-toggle" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
     </div>
   </div>
@@ -2602,6 +2602,7 @@ function rerenderHospitableViews() {
   renderPacing();
   renderMonthlyPerformanceMatrix();
   renderActionQueue();
+  setIdleSyncStatus();
 }
 function applySnapshotToDashboard(snapshot, source = {}) {
   if (!snapshot || typeof snapshot !== 'object') return false;
@@ -2686,6 +2687,12 @@ function browserSyncUnavailableCopy() {
 function refreshSyncControls() {
   const btn = document.getElementById('sync-btn');
   if (btn) {
+    if (btn.dataset.staticSync === 'encrypted-online') {
+      btn.textContent = 'Encrypted online snapshot';
+      btn.title = 'This online dashboard uses the encrypted published snapshot. Refresh data from the private dashboard, then republish.';
+      btn.disabled = true;
+      return;
+    }
     if (isFileOriginDashboard()) {
       btn.textContent = localSyncBridge.running ? '↻ Syncing…' : '↻ Sync now';
       btn.title = localSyncBridge.reachable
@@ -2796,7 +2803,9 @@ function setIdleSyncStatus() {
       setSyncStatus('', 'Token saved · ready for Browser Sync');
     }
   } else if (cacheTs) {
-    const suffix = source && source.kind === 'daily-snapshot' ? '' : ' · add token to use Browser Sync';
+    const sourceKind = source && source.kind;
+    const needsBrowserToken = !['daily-snapshot', 'encrypted-online', 'local-sync'].includes(sourceKind);
+    const suffix = needsBrowserToken ? ' · add token to use Browser Sync' : '';
     setSyncStatus('ok', `Using ${sourcePhrase} ${formatStamp(cacheTs, false)}${suffix}`);
   } else {
     setSyncStatus('err', 'No daily snapshot yet · add a token or run the sync script');
