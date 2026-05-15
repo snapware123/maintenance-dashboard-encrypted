@@ -3654,8 +3654,33 @@ const POTENTIAL_OCCUPANCY = 0.95;
 function clonePacingRows(rows) {
   return rows.map(row => ({ ...row }));
 }
+function livePacingBaseRows() {
+  const byName = new Map();
+  Object.values(reservationsByProp || {}).forEach(info => {
+    const name = info?.name || '';
+    if (!name || info.error || isExcludedPropertyName(name)) return;
+    const key = name.toLowerCase();
+    if (!byName.has(key)) {
+      byName.set(key, {
+        property: name,
+        units: 0,
+        apr_nights: 0,
+        apr_rev: 0,
+        apr_cleaning: 0,
+        may_nights: 0,
+        may_rev: 0,
+        may_cleaning: 0,
+      });
+    }
+    byName.get(key).units += 1;
+  });
+  return [...byName.values()].sort((a, b) => a.property.localeCompare(b.property));
+}
+function pacingBaseRows() {
+  return PACING_SEED_DATA.length ? PACING_SEED_DATA : livePacingBaseRows();
+}
 function resetPacingToSeed() {
-  PACING_DATA = clonePacingRows(PACING_SEED_DATA);
+  PACING_DATA = clonePacingRows(pacingBaseRows());
   pacingDataState = {
     mode: 'seed',
     coveragePct: 0,
@@ -4019,7 +4044,8 @@ function reservationNightRevenueShares(reservation, nightDates, totalNetRevenue)
 function buildMonthlyPerformanceRows() {
   const months = monthKeysForMatrix();
   const monthSet = new Set(months);
-  const rows = PACING_DATA.map(p => ({
+  const sourceRows = PACING_DATA.length ? PACING_DATA : pacingBaseRows();
+  const rows = sourceRows.map(p => ({
     property: p.property,
     units: p.units || 1,
     months: Object.fromEntries(months.map(month => [month, { revenue: 0, nights: 0 }])),
@@ -4396,8 +4422,9 @@ function computePacingFromReservations() {
   const m2 = (m1 + 1) % 12,  m2Year = m1 === 11 ? m1Year + 1 : m1Year;
   const rowsByKey = new Map();
   const statsByKey = new Map();
+  const baseRows = pacingBaseRows();
 
-  PACING_SEED_DATA.forEach(seed => {
+  baseRows.forEach(seed => {
     const key = String(seed.property || '').toLowerCase();
     if (!key) return;
     rowsByKey.set(key, {
@@ -4453,7 +4480,7 @@ function computePacingFromReservations() {
     });
   });
 
-  const rows = PACING_SEED_DATA.map(seed => rowsByKey.get(String(seed.property || '').toLowerCase()) || { ...seed });
+  const rows = baseRows.map(seed => rowsByKey.get(String(seed.property || '').toLowerCase()) || { ...seed });
   const missingFinancials = [];
   let reservationsInWindow = 0;
   let financialReservationsInWindow = 0;
