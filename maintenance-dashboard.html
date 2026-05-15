@@ -2205,9 +2205,9 @@
   <details class="explainer">
     <summary>How this monthly table works</summary>
     <div>
-    <strong>Revenue ex cleaning</strong> = Hospitable host revenue minus cleaning fee, allocated by stayed night so the monthly earnings line up with the occupancy month.<br>
+    <strong>Revenue ex cleaning</strong> = Hospitable host revenue minus cleaning fee, counted in the reservation check-in month because that is the payout month.<br>
     <strong>Occupancy</strong> = booked nights in that month ÷ (days in month × units).<br>
-    <strong>ADR</strong> = revenue ex cleaning ÷ booked nights in that month.<br>
+    <strong>ADR</strong> = revenue ex cleaning ÷ the full reservation nights for reservations checking in that month.<br>
     <strong>Scope</strong> = the same core 15 dashboard properties shown in pacing. This section keeps the matrix readable while matching the rest of your main revenue views.
     </div>
   </details>
@@ -3665,9 +3665,11 @@ function livePacingBaseRows() {
         property: name,
         units: 0,
         apr_nights: 0,
+        apr_adr_nights: 0,
         apr_rev: 0,
         apr_cleaning: 0,
         may_nights: 0,
+        may_adr_nights: 0,
         may_rev: 0,
         may_cleaning: 0,
       });
@@ -3757,16 +3759,20 @@ function monthCtx() {
 
 // Potential revenue at 95% occupancy = ADR × days in month × units × 95%.
 // Falls back to the other month's ADR if the target month has no bookings yet.
+function adrNights(p, month) {
+  return Number(p[`${month}_adr_nights`] || p[`${month}_nights`] || 0);
+}
+function adrCentsForPacing(p, month) {
+  const revenue = Number(p[`${month}_rev`] || 0);
+  const nights = adrNights(p, month);
+  return nights > 0 ? revenue / nights : 0;
+}
 function aprPotential(p) {
-  const adr = p.apr_nights > 0 ? p.apr_rev / p.apr_nights
-            : p.may_nights > 0 ? p.may_rev / p.may_nights
-            : 0;
+  const adr = adrCentsForPacing(p, 'apr') || adrCentsForPacing(p, 'may') || 0;
   return Math.round(adr * monthCtx().d1 * p.units * POTENTIAL_OCCUPANCY);
 }
 function mayPotential(p) {
-  const adr = p.may_nights > 0 ? p.may_rev / p.may_nights
-            : p.apr_nights > 0 ? p.apr_rev / p.apr_nights
-            : 0;
+  const adr = adrCentsForPacing(p, 'may') || adrCentsForPacing(p, 'apr') || 0;
   return Math.round(adr * monthCtx().d2 * p.units * POTENTIAL_OCCUPANCY);
 }
 
@@ -3823,12 +3829,12 @@ function pacingSortVal(p, key) {
     case 'apr_rev':  return p.apr_rev;
     case 'apr_max':  return aprPotential(p);
     case 'apr_net':  return p.apr_rev - p.apr_cleaning;
-    case 'apr_adr':  return p.apr_nights > 0 ? p.apr_rev / p.apr_nights : 0;
+    case 'apr_adr':  return adrCentsForPacing(p, 'apr');
     case 'may_occ':  return p.may_nights / mayDays;
     case 'may_rev':  return p.may_rev;
     case 'may_max':  return mayPotential(p);
     case 'may_net':  return p.may_rev - p.may_cleaning;
-    case 'may_adr':  return p.may_nights > 0 ? p.may_rev / p.may_nights : 0;
+    case 'may_adr':  return adrCentsForPacing(p, 'may');
     case 'trend':    return p.may_rev - p.apr_rev;
     default:         return 0;
   }
@@ -3838,8 +3844,8 @@ function pacingSortVal(p, key) {
 function pacingCell(p, key, paceMap = {}) {
   const { d1, d2 } = monthCtx();
   const aprDays = d1 * p.units, mayDays = d2 * p.units;
-  const aprADR  = p.apr_nights > 0 ? Math.round(p.apr_rev / p.apr_nights / 100) : 0;
-  const mayADR  = p.may_nights > 0 ? Math.round(p.may_rev / p.may_nights / 100) : 0;
+  const aprADR  = Math.round(adrCentsForPacing(p, 'apr') / 100) || 0;
+  const mayADR  = Math.round(adrCentsForPacing(p, 'may') / 100) || 0;
   const aprNet  = p.apr_rev - p.apr_cleaning;
   const mayNet  = p.may_rev - p.may_cleaning;
   const revDiff = p.may_rev - p.apr_rev;
@@ -4050,7 +4056,7 @@ function buildMonthlyPerformanceRows() {
   const rows = sourceRows.map(p => ({
     property: p.property,
     units: p.units || 1,
-    months: Object.fromEntries(months.map(month => [month, { revenue: 0, nights: 0 }])),
+    months: Object.fromEntries(months.map(month => [month, { revenue: 0, nights: 0, adrNights: 0 }])),
   }));
   const rowByKey = new Map(rows.map(row => [String(row.property || '').toLowerCase(), row]));
 
@@ -4074,15 +4080,18 @@ function buildMonthlyPerformanceRows() {
       }
       if (!nightDates.length) return;
 
-      const totalNetRevenue = Math.max(0, fields.revenue - fields.cleaning);
-      const nightlyRevenue = reservationNightRevenueShares(reservation, nightDates, totalNetRevenue);
-      nightDates.forEach((date, idx) => {
+      const payoutMonth = checkIn.slice(0, 7);
+      if (monthSet.has(payoutMonth)) {
+        const payoutBucket = row.months[payoutMonth];
+        payoutBucket.revenue += Math.max(0, fields.revenue - fields.cleaning);
+        payoutBucket.adrNights += nightDates.length;
+      }
+      nightDates.forEach(date => {
         const monthKey = date.slice(0, 7);
         if (!monthSet.has(monthKey)) return;
         const bucket = row.months[monthKey];
         if (!bucket) return;
         bucket.nights += 1;
-        bucket.revenue += nightlyRevenue[idx] || 0;
       });
     });
   });
@@ -4101,7 +4110,7 @@ function priorYearMonthKey(month) {
   return monthKeyFromParts(parsed.year - 1, parsed.monthIndex);
 }
 function monthlyAdrCents(bucket) {
-  return bucket && bucket.nights > 0 ? bucket.revenue / bucket.nights : 0;
+  return bucket && bucket.adrNights > 0 ? bucket.revenue / bucket.adrNights : 0;
 }
 function monthlyAdrYoY(currentBucket, priorBucket) {
   const currentAdr = monthlyAdrCents(currentBucket);
@@ -4188,19 +4197,19 @@ function renderMonthlyPerformanceMatrix() {
 
   body.innerHTML = visibleRows.map(row => {
     const cells = months.map(month => {
-      const bucket = row.months[month] || { revenue: 0, nights: 0 };
+      const bucket = row.months[month] || { revenue: 0, nights: 0, adrNights: 0 };
       const parsed = parseMonthKey(month);
       const days = parsed ? daysInMonth(parsed.year, parsed.monthIndex) * row.units : 0;
       const occPct = days ? Math.round(bucket.nights / days * 100) : 0;
       const occCls = monthlyOccClass(occPct, bucket.nights);
-      const adr = bucket.nights > 0 ? Math.round(bucket.revenue / bucket.nights / 100) : 0;
+      const adr = bucket.adrNights > 0 ? Math.round(bucket.revenue / bucket.adrNights / 100) : 0;
       const revenueZero = bucket.revenue <= 0;
       const yoy = monthlyAdrYoY(bucket, row.months[priorYearMonthKey(month)]);
       return `
         <td class="month-metric-cell${bucket.nights ? '' : ' empty'}">
           <div class="month-metric-rev${revenueZero ? ' zero' : ''}">${revenueZero ? '$0' : fmtRev(bucket.revenue)}</div>
           <div class="month-metric-subrow"><strong class="${occCls}">${occPct}%</strong></div>
-          <div class="month-metric-subrow"><strong class="${bucket.nights ? '' : 'zero'}">${bucket.nights ? `$${adr}/nt` : '—'}</strong></div>
+          <div class="month-metric-subrow"><strong class="${bucket.adrNights ? '' : 'zero'}">${bucket.adrNights ? `$${adr}/nt` : '—'}</strong></div>
           <div class="month-metric-note ${yoy.cls}">${yoy.label}</div>
         </td>`;
     }).join('');
@@ -4417,7 +4426,7 @@ function uniqueReservationsForProperty(reservations) {
 }
 
 // Aggregate reservations into the pacing shape used by PACING_DATA.
-// Revenue and occupancy are allocated by stayed night so month totals match Hospitable's monthly views.
+// Occupancy is calendar/stayed-night based; revenue follows check-in month because payout lands after check-in.
 function computePacingFromReservations() {
   const now = new Date();
   const m1 = now.getMonth(), m1Year = now.getFullYear();
@@ -4435,9 +4444,11 @@ function computePacingFromReservations() {
       property: seed.property,
       units: seed.units,
       apr_nights: 0,
+      apr_adr_nights: 0,
       apr_rev: 0,
       apr_cleaning: 0,
       may_nights: 0,
+      may_adr_nights: 0,
       may_rev: 0,
       may_cleaning: 0,
     });
@@ -4458,55 +4469,48 @@ function computePacingFromReservations() {
     const stat = statsByKey.get(key);
     if (!row || !stat || !Array.isArray(reservations) || info.error) return;
 
-	  uniqueReservationsForProperty(reservations).forEach(r => {
-	    if (isInactiveReservation(r)) return;
-	    const fields = reservationFields(r);
-	    const checkIn = reservationDateOnly(fields.ci);
-	    const checkOut = reservationDateOnly(fields.co);
-	    const startDate = localDateFromISO(checkIn);
-	    const endDate = localDateFromISO(checkOut);
-	    if (!startDate || !endDate || !(fields.nights > 0)) return;
-	    const hasFinancials = reservationHasFinancials(r);
-	    const nightDates = [];
-	    for (const day = new Date(startDate); day < endDate; day.setDate(day.getDate() + 1)) {
-	      nightDates.push(localISODate(day));
-	    }
-	    if (!nightDates.length) return;
+    uniqueReservationsForProperty(reservations).forEach(r => {
+      if (isInactiveReservation(r)) return;
+      const fields = reservationFields(r);
+      const checkIn = reservationDateOnly(fields.ci);
+      const checkOut = reservationDateOnly(fields.co);
+      const startDate = localDateFromISO(checkIn);
+      const endDate = localDateFromISO(checkOut);
+      if (!startDate || !endDate || !(fields.nights > 0)) return;
+      const hasFinancials = reservationHasFinancials(r);
+      const nightDates = [];
+      for (const day = new Date(startDate); day < endDate; day.setDate(day.getDate() + 1)) {
+        nightDates.push(localISODate(day));
+      }
+      if (!nightDates.length) return;
 
-	    const revenueShares = reservationNightRevenueShares(r, nightDates, fields.revenue);
-	    const cleaningShares = reservationNightRevenueShares(r, nightDates, fields.cleaning);
-	    let touchedM1 = false;
-	    let touchedM2 = false;
+      nightDates.forEach(date => {
+        const monthKey = date.slice(0, 7);
+        if (monthKey === m1Key) row.apr_nights += 1;
+        else if (monthKey === m2Key) row.may_nights += 1;
+      });
 
-	    nightDates.forEach((date, idx) => {
-	      const monthKey = date.slice(0, 7);
-	      if (monthKey === m1Key) {
-	        row.apr_nights += 1;
-	        touchedM1 = true;
-	        if (hasFinancials) {
-	          row.apr_rev += revenueShares[idx] || 0;
-	          row.apr_cleaning += cleaningShares[idx] || 0;
-	        }
-	      } else if (monthKey === m2Key) {
-	        row.may_nights += 1;
-	        touchedM2 = true;
-	        if (hasFinancials) {
-	          row.may_rev += revenueShares[idx] || 0;
-	          row.may_cleaning += cleaningShares[idx] || 0;
-	        }
-	      }
-	    });
+      const payoutMonth = checkIn.slice(0, 7);
+      if (hasFinancials && payoutMonth === m1Key) {
+        row.apr_rev += fields.revenue;
+        row.apr_cleaning += fields.cleaning;
+        row.apr_adr_nights += nightDates.length;
+      } else if (hasFinancials && payoutMonth === m2Key) {
+        row.may_rev += fields.revenue;
+        row.may_cleaning += fields.cleaning;
+        row.may_adr_nights += nightDates.length;
+      }
 
-	    if (touchedM1) {
-	      stat.aprReservations += 1;
-	      if (hasFinancials) stat.aprFinancialReservations += 1;
-	    }
-	    if (touchedM2) {
-	      stat.mayReservations += 1;
-	      if (hasFinancials) stat.mayFinancialReservations += 1;
-	    }
-	  });
-	});
+      if (payoutMonth === m1Key) {
+        stat.aprReservations += 1;
+        if (hasFinancials) stat.aprFinancialReservations += 1;
+      }
+      if (payoutMonth === m2Key) {
+        stat.mayReservations += 1;
+        if (hasFinancials) stat.mayFinancialReservations += 1;
+      }
+    });
+  });
 
   const rows = baseRows.map(seed => rowsByKey.get(String(seed.property || '').toLowerCase()) || { ...seed });
   const missingFinancials = [];
