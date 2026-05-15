@@ -3815,7 +3815,8 @@ function effectivePotentialMay(p) {
 }
 
 function pacingSortVal(p, key) {
-  const aprDays = 30 * p.units, mayDays = 31 * p.units;
+  const { d1, d2 } = monthCtx();
+  const aprDays = d1 * p.units, mayDays = d2 * p.units;
   switch (key) {
     case 'property': return p.property.toLowerCase();
     case 'apr_occ':  return p.apr_nights / aprDays;
@@ -3835,7 +3836,8 @@ function pacingSortVal(p, key) {
 
 // Returns the <td> HTML for a given column key and row data
 function pacingCell(p, key, paceMap = {}) {
-  const aprDays = 30 * p.units, mayDays = 31 * p.units;
+  const { d1, d2 } = monthCtx();
+  const aprDays = d1 * p.units, mayDays = d2 * p.units;
   const aprADR  = p.apr_nights > 0 ? Math.round(p.apr_rev / p.apr_nights / 100) : 0;
   const mayADR  = p.may_nights > 0 ? Math.round(p.may_rev / p.may_nights / 100) : 0;
   const aprNet  = p.apr_rev - p.apr_cleaning;
@@ -4360,7 +4362,7 @@ function reservationStatus(r) {
   return String(raw).toLowerCase();
 }
 function isInactiveReservation(r) {
-  return /(cancel|declin|expired|void)/.test(reservationStatus(r));
+  return /(cancel|declin|deni|reject|expired|void)/.test(reservationStatus(r));
 }
 function bookingTimestampFor(r) {
   return r.booked_at || r.created_at || r.booking_date || r.reservation_date || r.inserted_at ||
@@ -4415,11 +4417,13 @@ function uniqueReservationsForProperty(reservations) {
 }
 
 // Aggregate reservations into the pacing shape used by PACING_DATA.
-// Attribution: a reservation's revenue is attributed to its check-in month.
+// Revenue and occupancy are allocated by stayed night so month totals match Hospitable's monthly views.
 function computePacingFromReservations() {
   const now = new Date();
   const m1 = now.getMonth(), m1Year = now.getFullYear();
   const m2 = (m1 + 1) % 12,  m2Year = m1 === 11 ? m1Year + 1 : m1Year;
+  const m1Key = monthKeyFromParts(m1Year, m1);
+  const m2Key = monthKeyFromParts(m2Year, m2);
   const rowsByKey = new Map();
   const statsByKey = new Map();
   const baseRows = pacingBaseRows();
@@ -4454,31 +4458,55 @@ function computePacingFromReservations() {
     const stat = statsByKey.get(key);
     if (!row || !stat || !Array.isArray(reservations) || info.error) return;
 
-    uniqueReservationsForProperty(reservations).forEach(r => {
-      if (isInactiveReservation(r)) return;
-      const { ci, nights, revenue, cleaning } = reservationFields(r);
-      if (!ci || !nights) return;
-      const hasFinancials = reservationHasFinancials(r);
-      const d = new Date(ci);
-      if (d.getMonth() === m1 && d.getFullYear() === m1Year) {
-        row.apr_nights += nights;
-        if (hasFinancials) {
-          row.apr_rev += revenue;
-          row.apr_cleaning += cleaning;
-          stat.aprFinancialReservations += 1;
-        }
-        stat.aprReservations += 1;
-      } else if (d.getMonth() === m2 && d.getFullYear() === m2Year) {
-        row.may_nights += nights;
-        if (hasFinancials) {
-          row.may_rev += revenue;
-          row.may_cleaning += cleaning;
-          stat.mayFinancialReservations += 1;
-        }
-        stat.mayReservations += 1;
-      }
-    });
-  });
+	  uniqueReservationsForProperty(reservations).forEach(r => {
+	    if (isInactiveReservation(r)) return;
+	    const fields = reservationFields(r);
+	    const checkIn = reservationDateOnly(fields.ci);
+	    const checkOut = reservationDateOnly(fields.co);
+	    const startDate = localDateFromISO(checkIn);
+	    const endDate = localDateFromISO(checkOut);
+	    if (!startDate || !endDate || !(fields.nights > 0)) return;
+	    const hasFinancials = reservationHasFinancials(r);
+	    const nightDates = [];
+	    for (const day = new Date(startDate); day < endDate; day.setDate(day.getDate() + 1)) {
+	      nightDates.push(localISODate(day));
+	    }
+	    if (!nightDates.length) return;
+
+	    const revenueShares = reservationNightRevenueShares(r, nightDates, fields.revenue);
+	    const cleaningShares = reservationNightRevenueShares(r, nightDates, fields.cleaning);
+	    let touchedM1 = false;
+	    let touchedM2 = false;
+
+	    nightDates.forEach((date, idx) => {
+	      const monthKey = date.slice(0, 7);
+	      if (monthKey === m1Key) {
+	        row.apr_nights += 1;
+	        touchedM1 = true;
+	        if (hasFinancials) {
+	          row.apr_rev += revenueShares[idx] || 0;
+	          row.apr_cleaning += cleaningShares[idx] || 0;
+	        }
+	      } else if (monthKey === m2Key) {
+	        row.may_nights += 1;
+	        touchedM2 = true;
+	        if (hasFinancials) {
+	          row.may_rev += revenueShares[idx] || 0;
+	          row.may_cleaning += cleaningShares[idx] || 0;
+	        }
+	      }
+	    });
+
+	    if (touchedM1) {
+	      stat.aprReservations += 1;
+	      if (hasFinancials) stat.aprFinancialReservations += 1;
+	    }
+	    if (touchedM2) {
+	      stat.mayReservations += 1;
+	      if (hasFinancials) stat.mayFinancialReservations += 1;
+	    }
+	  });
+	});
 
   const rows = baseRows.map(seed => rowsByKey.get(String(seed.property || '').toLowerCase()) || { ...seed });
   const missingFinancials = [];
