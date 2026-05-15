@@ -4587,6 +4587,18 @@ async function fetchLocalBridgeJson(path, { method = 'GET', timeoutMs = 5000 } =
   }
 }
 async function probeLocalSyncBridge({ silent = false } = {}) {
+  if (!LOCAL_SYNC_BRIDGE) {
+    localSyncBridge = {
+      checked: true,
+      reachable: false,
+      running: false,
+      error: 'Local sync helper disabled for this hosted dashboard',
+      snapshotTs: null,
+    };
+    refreshSyncControls();
+    if (!silent) setIdleSyncStatus();
+    return false;
+  }
   try {
     const health = await fetchLocalBridgeJson('/health', { timeoutMs: 2500 });
     const rawTs = health?.snapshot?.generatedAt || health?.lastSync?.generatedAt || '';
