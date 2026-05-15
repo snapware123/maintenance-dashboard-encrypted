@@ -2360,6 +2360,7 @@ const SNAPSHOT_GLOBAL   = '__MAINTENANCE_DASHBOARD_SNAPSHOT__';
 const HOSPITABLE_BASE   = '';
 const LOCAL_SYNC_BRIDGE = '';
 const PACING_SEED_LABEL = 'Apr 17, 2026';
+const EXCLUDED_PROPERTY_NAMES = new Set(['la placita 4 bedrooms']);
 
 // ── Seed: Maintenance issues from Hospitable pull 4/17/26 ─────────────────────
 const SEED_MAINT = [];
@@ -2472,10 +2473,11 @@ function collapseAllSections() {
 
 // ── Property filter ──
 let activePropFilter = '';
-function loadPropFilter() {
-  activePropFilter = localStorage.getItem(PROP_FILTER_KEY) || '';
-  applyPropFilter();
-}
+	function loadPropFilter() {
+	  activePropFilter = localStorage.getItem(PROP_FILTER_KEY) || '';
+	  if (isExcludedPropertyName(activePropFilter)) activePropFilter = '';
+	  applyPropFilter();
+	}
 function setPropFilter(name) {
   activePropFilter = name || '';
   if (activePropFilter) localStorage.setItem(PROP_FILTER_KEY, activePropFilter);
@@ -2562,16 +2564,36 @@ function hospitableSourcePhrase(source) {
   const label = hospitableSourceLabel(source);
   return label.charAt(0).toLowerCase() + label.slice(1);
 }
-function snapshotPayload(snapshot) {
-  return {
-    reservations: snapshot.reservationsByProp || snapshot.reservations || (snapshot.data && (snapshot.data.reservationsByProp || snapshot.data.reservations)) || {},
-    calendar: snapshot.calendarByProp || snapshot.calendar || (snapshot.data && (snapshot.data.calendarByProp || snapshot.data.calendar)) || {},
-    messages: snapshot.messagesByReservation || snapshot.messages || (snapshot.data && (snapshot.data.messagesByReservation || snapshot.data.messages)) || {},
-    pricingHistory: snapshot.pricingHistoryByProp || snapshot.pricingHistory || (snapshot.data && (snapshot.data.pricingHistoryByProp || snapshot.data.pricingHistory)) || {},
-    pickup: snapshot.pickupByProp || snapshot.pickup || (snapshot.data && (snapshot.data.pickupByProp || snapshot.data.pickup)) || {},
-  };
-}
-function snapshotGeneratedTs(snapshot) {
+	function snapshotPayload(snapshot) {
+	  const reservations = filterPropertyMap(snapshot.reservationsByProp || snapshot.reservations || (snapshot.data && (snapshot.data.reservationsByProp || snapshot.data.reservations)) || {});
+	  const calendar = filterPropertyMap(snapshot.calendarByProp || snapshot.calendar || (snapshot.data && (snapshot.data.calendarByProp || snapshot.data.calendar)) || {});
+	  const messages = filterPropertyMap(snapshot.messagesByReservation || snapshot.messages || (snapshot.data && (snapshot.data.messagesByReservation || snapshot.data.messages)) || {});
+	  const pricingHistory = filterPropertyMap(snapshot.pricingHistoryByProp || snapshot.pricingHistory || (snapshot.data && (snapshot.data.pricingHistoryByProp || snapshot.data.pricingHistory)) || {});
+	  const pickup = filterPropertyMap(snapshot.pickupByProp || snapshot.pickup || (snapshot.data && (snapshot.data.pickupByProp || snapshot.data.pickup)) || {}, { keyIsPropertyName: true });
+	  return {
+	    reservations,
+	    calendar,
+	    messages,
+	    pricingHistory,
+	    pickup,
+	  };
+	}
+	function isExcludedPropertyName(name) {
+	  return EXCLUDED_PROPERTY_NAMES.has(String(name || '').trim().toLowerCase());
+	}
+	function propertyNameFromPayloadEntry(entry, fallback = '') {
+	  return entry?.name || entry?.propertyName || entry?.property || fallback;
+	}
+	function filterPropertyMap(map, { keyIsPropertyName = false } = {}) {
+	  const filtered = {};
+	  Object.entries(map || {}).forEach(([key, entry]) => {
+	    const name = keyIsPropertyName ? key : propertyNameFromPayloadEntry(entry);
+	    if (isExcludedPropertyName(name)) return;
+	    filtered[key] = entry;
+	  });
+	  return filtered;
+	}
+	function snapshotGeneratedTs(snapshot) {
   const rawTs = snapshot.generatedAt || snapshot.generated_at || snapshot.updatedAt || snapshot.updated_at || snapshot.ts;
   return typeof rawTs === 'number' ? rawTs : (Date.parse(rawTs || '') || Date.now());
 }
@@ -2581,11 +2603,11 @@ function persistHospitableCache({ reservations = {}, calendar = {}, messages = {
     label: source.label || (source.kind === 'daily-snapshot' ? 'Daily snapshot' : 'Browser sync'),
     detail: source.detail || '',
   };
-  reservationsByProp = reservations;
-  calendarByProp = calendar;
-  messagesByReservation = messages;
-  if (pricingHistory && typeof pricingHistory === 'object') pricingHistoryByProp = pricingHistory;
-  pickupByProp = pickup || {};
+	  reservationsByProp = filterPropertyMap(reservations);
+	  calendarByProp = filterPropertyMap(calendar);
+	  messagesByReservation = filterPropertyMap(messages);
+	  if (pricingHistory && typeof pricingHistory === 'object') pricingHistoryByProp = filterPropertyMap(pricingHistory);
+	  pickupByProp = filterPropertyMap(pickup || {}, { keyIsPropertyName: true });
   localStorage.setItem(RESERVATIONS_KEY, JSON.stringify({ ts, data: reservationsByProp, source: meta }));
   localStorage.setItem(CALENDAR_KEY, JSON.stringify({ ts, data: calendarByProp, source: meta }));
   localStorage.setItem(MESSAGES_KEY, JSON.stringify({ ts, data: messagesByReservation, source: meta }));
@@ -4678,9 +4700,10 @@ async function syncHospitableViaBrowser() {
   btn.disabled = true;
   setSyncStatus('pend', 'Running Browser Sync for Hospitable properties…');
   try {
-    const propsRes   = await apiFetch('/properties', { per_page: 100 });
-    const properties = propsRes.data || propsRes.properties || [];
-    if (!properties.length) throw new Error('No properties returned — check token scopes');
+	    const propsRes   = await apiFetch('/properties', { per_page: 100 });
+	    const properties = (propsRes.data || propsRes.properties || [])
+	      .filter(p => !isExcludedPropertyName(p.name || p.public_name || p.internal_name || `Property ${p.id}`));
+	    if (!properties.length) throw new Error('No properties returned — check token scopes');
 
     // Range: 500 days back (for monthly history + lead-time baseline) → end of next month (or today+60, whichever is later)
     const today      = new Date();
@@ -4808,21 +4831,21 @@ function loadCachedReservations() {
     const raw = localStorage.getItem(RESERVATIONS_KEY);
     if (!raw) return;
     const parsed = JSON.parse(raw);
-    reservationsByProp = parsed.data || {};
+	    reservationsByProp = filterPropertyMap(parsed.data || {});
 
-    // Load calendar cache before rendering so price overlays stay visible.
-    try {
-      const rawCal = localStorage.getItem(CALENDAR_KEY);
-      if (rawCal) calendarByProp = (JSON.parse(rawCal).data) || {};
-    } catch {}
-    try {
-      const rawMessages = localStorage.getItem(MESSAGES_KEY);
-      if (rawMessages) messagesByReservation = (JSON.parse(rawMessages).data) || {};
-    } catch {}
-    try {
-      const rawPickup = localStorage.getItem(PICKUP_KEY);
-      if (rawPickup) pickupByProp = (JSON.parse(rawPickup).data) || {};
-    } catch {}
+	    // Load calendar cache before rendering so price overlays stay visible.
+	    try {
+	      const rawCal = localStorage.getItem(CALENDAR_KEY);
+	      if (rawCal) calendarByProp = filterPropertyMap((JSON.parse(rawCal).data) || {});
+	    } catch {}
+	    try {
+	      const rawMessages = localStorage.getItem(MESSAGES_KEY);
+	      if (rawMessages) messagesByReservation = filterPropertyMap((JSON.parse(rawMessages).data) || {});
+	    } catch {}
+	    try {
+	      const rawPickup = localStorage.getItem(PICKUP_KEY);
+	      if (rawPickup) pickupByProp = filterPropertyMap((JSON.parse(rawPickup).data) || {}, { keyIsPropertyName: true });
+	    } catch {}
 
     applyBestPacingData();
     refreshSourceCopy();
@@ -4925,7 +4948,7 @@ function renderEmptyNights() {
   const countEl = document.getElementById('en-count');
   if (!host) return;
 
-  // Hide Tate co-host account properties + apply active property filter
+	  // Hide Tate co-host account properties + apply active/excluded property filters.
   const TATE_RX = /\btate\b/i;
   const ids = Object.keys(reservationsByProp).filter(id => {
     const info = reservationsByProp[id];
