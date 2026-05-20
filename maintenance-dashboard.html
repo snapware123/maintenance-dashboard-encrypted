@@ -2115,7 +2115,7 @@
     <summary>How these metrics are calculated</summary>
     <div>
     <strong>Revenue</strong> = Hospitable <code>financials.host.revenue</code> — accommodation + guest fees (cleaning, resort, pet) minus host service fee and discounts. This is what hits your payout, not the gross guest price.<br>
-    <strong>Earned Revenue</strong> = Revenue minus pass-through cleaning, except listings where cleaning is kept in full (Sylvia La Placita 2BR, CSV 1605, CSV 20th Floor, Nacho 9th Floor, CSV 1702, Nacho Villa 16A) include that cleaning back into revenue.<br>
+    <strong>Earned Revenue</strong> = Revenue minus pass-through cleaning, except listings where cleaning is kept in full (Sylvia La Placita 2BR, CSV 1605, CSV 20th Floor, Nacho 9th Floor, CSV 1702, Nacho Villa 16A, Marlon Back Apartment) include that cleaning back into revenue.<br>
     <strong>Max Potential (at 95%)</strong> = ADR × days in month × units × 95% — a practical target rather than a full sellout ceiling. For a listing with zero bookings in a month, it falls back to the other month's ADR. Use this to see how much is still on the table at today's pricing.<br>
     <strong>Summary cards</strong> = the main headline shows gross revenue against gross potential at 95% occupancy. The smaller subheadline shows your take-home on those same bookings. For owned properties = gross revenue. For managed properties = full cleaning fee + 20% of non-cleaning revenue. Potential scales cleaning proportionally with occupancy. Per-row "your take" appears under Max (95%) on managed listings.<br>
     <strong>Occupancy %</strong> = booked nights ÷ (days in month × units). Multi-unit listings scale the denominator accordingly.<br>
@@ -3804,6 +3804,7 @@ const CLEANING_RETAINED = new Set([
   'Nacho 9th Floor',
   'CSV 1702',
   'Nacho Villa 16A',
+  'Marlon Back Apartment',
 ]);
 function propertyNameForRevenue(propertyOrRow) {
   return typeof propertyOrRow === 'string'
