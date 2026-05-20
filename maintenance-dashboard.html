@@ -2360,7 +2360,12 @@ const SNAPSHOT_GLOBAL   = '__MAINTENANCE_DASHBOARD_SNAPSHOT__';
 const HOSPITABLE_BASE   = '';
 const LOCAL_SYNC_BRIDGE = '';
 const PACING_SEED_LABEL = 'Apr 17, 2026';
-const EXCLUDED_PROPERTY_NAMES = new Set(['la placita 4 bedrooms']);
+const EXCLUDED_PROPERTY_NAMES = new Set([
+  'la placita 4 bedrooms',
+  'la rada 414',
+  'tate 414 la rada',
+  'tate cdm',
+]);
 
 // ── Seed: Maintenance issues from Hospitable pull 4/17/26 ─────────────────────
 const SEED_MAINT = [];
@@ -2501,6 +2506,7 @@ function applyPropFilter() {
   }
 }
 function matchesPropFilter(name) {
+  if (isExcludedPropertyName(name)) return false;
   return !activePropFilter || (name || '').toLowerCase() === activePropFilter.toLowerCase();
 }
 
