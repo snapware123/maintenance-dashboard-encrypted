@@ -2718,7 +2718,7 @@
       <span class="count" id="monthly-count" style="background:var(--info-bg);color:var(--info-fg)">—</span>
     </div>
     <div class="section-tools">
-      <span style="font-size:var(--fs-cap);color:var(--text-mute)" id="monthly-source">Each month cell: net revenue · occupancy · ADR · ADR vs same month last year</span>
+      <span style="font-size:var(--fs-cap);color:var(--text-mute)" id="monthly-source">Each month cell: earned revenue · occupancy · ADR · ADR vs same month last year</span>
       <select id="monthly-sort" onchange="renderMonthlyPerformanceMatrix()">
         <option value="property">Sort: Property</option>
         <option value="latest-revenue-low">Latest: Lowest revenue</option>
@@ -4327,7 +4327,7 @@ function attentionLevel(p) {
 }
 const ATTN_LABEL = { critical: 'Attention', warning: 'Watch', great: 'Healthy', ok: '' };
 
-// ── Management-only properties (user keeps 20% of net revenue ex. cleaning) ──
+// ── Management-only properties (user keeps 20% of non-cleaning revenue) ──
 let MGMT_ONLY = new Set();
 function setManagedProperties(names) { MGMT_ONLY = new Set(Array.isArray(names) ? names : []); }
 const MGMT_RATE = 0.20;
@@ -4744,8 +4744,8 @@ function renderMonthlyPerformanceMatrix() {
   const cacheInfo = latestHospitableCacheInfo();
   if (source) {
     source.textContent = cacheInfo.ts
-      ? `Each month cell: net revenue · occupancy · ADR · ADR vs same month last year · ${hospitableSourcePhrase(cacheInfo.source)} ${formatStamp(cacheInfo.ts, false)}`
-      : 'Each month cell: net revenue · occupancy · ADR · ADR vs same month last year';
+      ? `Each month cell: earned revenue · occupancy · ADR · ADR vs same month last year · ${hospitableSourcePhrase(cacheInfo.source)} ${formatStamp(cacheInfo.ts, false)}`
+      : 'Each month cell: earned revenue · occupancy · ADR · ADR vs same month last year';
   }
 
   if (!months.length || !visibleRows.length) {
